@@ -84,7 +84,7 @@ jobs:
           show_full_output: true
           claude_args: |
             --max-turns 200
-            --allowedTools "Bash,Edit,Write,Read,Glob,Grep,Task,TodoWrite"
+            --allowedTools "Bash,Edit,Write,Read,Glob,Grep,TodoWrite"
           prompt: |
             あなたはこのリポジトリの自律開発エージェントです。以下を順に実行してください。
 
@@ -96,9 +96,10 @@ jobs:
             6. PR作成後、`gh pr merge --auto --squash` を実行してauto-mergeを予約する
 
             完結ルール(最重要):
-            - 作業は必ずこのセッション内で完結させること。調査・実装を後続や別エージェントに
-              委ねた状態でターンを終了してはならない。Taskツールで調査を出した場合は、
-              その結果を受け取り統合するまで終了しないこと
+            - サブエージェント(Task)とバックグラウンド実行は使用禁止。コードベースの調査は
+              Glob/Grep/Readを使って自分自身でその場で行うこと
+            - 作業は必ずこのセッション内で完結させること。「後で続きをやる」「結果を待つ」
+              という状態でターンを終了してはならない
             - 終了してよいのは「手順6まで完了した」か「未完了タスクが1つもない」かの
               どちらかの場合のみ
 
@@ -119,7 +120,7 @@ jobs:
           show_full_output: true
           claude_args: |
             --max-turns 200
-            --allowedTools "Bash,Edit,Write,Read,Glob,Grep,Task,TodoWrite"
+            --allowedTools "Bash,Edit,Write,Read,Glob,Grep,TodoWrite"
           prompt: |
             あなたはこのリポジトリの修理エージェントです。PR #${{ steps.guard.outputs.pr }} の
             CIが失敗しています。以下を順に実行してください。
@@ -130,9 +131,11 @@ jobs:
             4. 同じブランチにコミットしてpushする
             5. `gh pr merge ${{ steps.guard.outputs.pr }} --auto --squash` でauto-mergeを予約する
 
-            完結ルール: 修正のpush完了までこのセッション内で完結させること。
-            どうしても原因が特定できない場合のみ、PRに調査結果をコメントで残して終了する。
-            新しいタスクへの着手やPRのクローズはしないこと。
+            完結ルール:
+            - サブエージェント(Task)とバックグラウンド実行は使用禁止。調査は自分自身で行う
+            - 修正のpush完了までこのセッション内で完結させること
+            - どうしても原因が特定できない場合のみ、PRに調査結果をコメントで残して終了する
+            - 新しいタスクへの着手やPRのクローズはしないこと
 
       # 保険: Claudeがauto-merge予約を忘れても、開いているclaude PR全てに予約を入れる
       # (PATで実行することでマージ後のpushが連鎖トリガーを正しく発火させる)
@@ -144,3 +147,17 @@ jobs:
           for n in $(gh pr list --state open --search "head:claude/" --json number --jq '.[].number'); do
             gh pr merge "$n" --auto --squash || true
           done
+
+      # 成果検問: implementモードで働いたのにPRも直近マージも無ければ実行を赤にする
+      # (早期終了バグ等の「静かな失敗」を可視化する。赤でも次のcronが自動で再挑戦する)
+      - name: 成果検問
+        if: steps.guard.outputs.mode == 'implement'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          open=$(gh pr list --state open --search "head:claude/" --json number --jq 'length')
+          merged=$(git log origin/main --since="30 minutes ago" --oneline | wc -l)
+          if [ "$open" -eq 0 ] && [ "$merged" -eq 0 ]; then
+            echo "::error::実装実行がPRを残さず終了した(早期終了バグの可能性)"
+            exit 1
+          fi
