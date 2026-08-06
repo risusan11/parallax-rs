@@ -1,5 +1,6 @@
 import {
   INVISIBLE_COORDINATE_ROOM,
+  distance,
   evaluateClearCondition,
   resolveMove,
   type Vector2,
@@ -38,12 +39,21 @@ export class PlayerState extends Schema {
   @type('number') y = INITIAL_POSITION.y;
 }
 
-/** ステージの進行状況。待機(人数待ち)→プレイ中→クリア、の一方向に遷移する。 */
+/**
+ * ステージの進行状況。待機(人数待ち)→プレイ中→クリアの順に進み、
+ * クリア後は「もう一度プレイする」操作でプレイ中へ戻る(リトライ)。
+ */
 export type RoomStatus = 'waiting' | 'playing' | 'cleared';
 
 export class ParallaxRoomState extends Schema {
   @type({ map: PlayerState }) players = new MapSchema<PlayerState>();
   @type('string') status: RoomStatus = 'waiting';
+  /** クリアまでにかかった時間(ミリ秒)。リザルト画面に表示する。プレイ中は0。 */
+  @type('number') clearTimeMs = 0;
+  /** 観測者がこれまでに移動した距離の合計(マス数)。 */
+  @type('number') observerDistance = 0;
+  /** クリア後の「もう一度プレイする」による再挑戦回数。 */
+  @type('number') retryCount = 0;
 }
 
 /**
@@ -53,9 +63,13 @@ export class ParallaxRoomState extends Schema {
 export class ParallaxRoom extends Room<{ state: ParallaxRoomState }> {
   maxClients = ROLE_ASSIGNMENT_ORDER.length;
 
+  /** 現在のプレイ開始時刻(ms)。ルーム状態には同期せず、クリア時間の算出にのみ使う。 */
+  private playStartedAt: number | undefined;
+
   onCreate(): void {
     this.setState(new ParallaxRoomState());
     this.onMessage<unknown>('move', (client, message) => this.handleMove(client, message));
+    this.onMessage<unknown>('retry', () => this.handleRetry());
   }
 
   onJoin(client: Client): void {
@@ -70,6 +84,7 @@ export class ParallaxRoom extends Room<{ state: ParallaxRoomState }> {
 
     if (this.state.players.size === this.maxClients) {
       this.state.status = 'playing';
+      this.playStartedAt = Date.now();
     }
   }
 
@@ -88,11 +103,12 @@ export class ParallaxRoom extends Room<{ state: ParallaxRoomState }> {
     const role = INVISIBLE_COORDINATE_ROOM.roles.find((candidate) => candidate.id === player.roleId);
     if (role === undefined || !role.tools.includes(MOVE_TOOL_ID)) return;
 
-    const next = resolveMove(
-      INVISIBLE_COORDINATE_ROOM.layers,
-      { x: player.x, y: player.y },
-      { x: message.dx, y: message.dy },
-    );
+    const from = { x: player.x, y: player.y };
+    const next = resolveMove(INVISIBLE_COORDINATE_ROOM.layers, from, {
+      x: message.dx,
+      y: message.dy,
+    });
+    this.state.observerDistance += distance(from, next);
     player.x = next.x;
     player.y = next.y;
 
@@ -101,7 +117,8 @@ export class ParallaxRoom extends Room<{ state: ParallaxRoomState }> {
 
   /**
    * 役職IDごとの現在位置を集め、core の evaluateClearCondition でクリア
-   * 条件を満たしたか判定する。満たしていればステータスをクリアへ遷移させる。
+   * 条件を満たしたか判定する。満たしていればステータスをクリアへ遷移させ、
+   * プレイ開始からの経過時間をクリア時間として記録する。
    */
   private updateClearStatus(): void {
     const positions: Record<string, Vector2> = {};
@@ -110,7 +127,27 @@ export class ParallaxRoom extends Room<{ state: ParallaxRoomState }> {
     }
     if (evaluateClearCondition(INVISIBLE_COORDINATE_ROOM.clearCondition, positions)) {
       this.state.status = 'cleared';
+      this.state.clearTimeMs = Date.now() - (this.playStartedAt ?? Date.now());
     }
+  }
+
+  /**
+   * リザルト画面の「もう一度プレイする」による再挑戦を扱う。クリア後にのみ
+   * 受け付け、プレイヤー位置と移動距離・クリア時間を初期化してプレイ中へ戻す。
+   * リトライ回数は再挑戦のたびに加算し、クリアするたびにリセットはしない。
+   */
+  private handleRetry(): void {
+    if (this.state.status !== 'cleared') return;
+
+    for (const player of this.state.players.values()) {
+      player.x = INITIAL_POSITION.x;
+      player.y = INITIAL_POSITION.y;
+    }
+    this.state.observerDistance = 0;
+    this.state.clearTimeMs = 0;
+    this.state.retryCount += 1;
+    this.playStartedAt = Date.now();
+    this.state.status = 'playing';
   }
 
   onLeave(client: Client): void {

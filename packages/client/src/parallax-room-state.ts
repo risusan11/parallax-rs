@@ -12,6 +12,9 @@ export interface ParallaxPlayerState {
 
 export interface ParallaxRoomState {
   readonly status: string;
+  readonly clearTimeMs: number;
+  readonly observerDistance: number;
+  readonly retryCount: number;
   readonly players: {
     readonly size: number;
     forEach(callback: (player: ParallaxPlayerState, sessionId: string) => void): void;
