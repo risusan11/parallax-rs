@@ -6,18 +6,12 @@ import {
   type TextConditionLayer,
   type TileLayer,
 } from '@parallax-rs/core';
-import { Client, type Room } from 'colyseus.js';
+import type { Room } from 'colyseus.js';
 import Phaser from 'phaser';
 import { directionToMoveDelta, type MoveDirection } from './movement-input.js';
 import { layoutObjects } from './object-map-view.js';
 import type { ParallaxRoomState } from './parallax-room-state.js';
-import {
-  PARALLAX_ROOM_NAME,
-  formatRoomStateLog,
-  isCleared,
-  resolveServerUrl,
-  type PlayerSnapshot,
-} from './room-connection.js';
+import { formatRoomStateLog, isCleared, type PlayerSnapshot } from './room-connection.js';
 import { gridToPixel, layoutTiles, TILE_SIZE } from './tile-map-view.js';
 import { layoutConditionTexts } from './text-condition-view.js';
 
@@ -38,10 +32,14 @@ const OBJECT_COLORS: Readonly<Record<string, number>> = {
 
 type WasdKeys = Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
 
+export interface MainSceneData {
+  readonly room: Room<ParallaxRoomState>;
+}
+
 /**
- * Phaser + Colyseus のメインシーン。サーバーに接続してルーム状態をコンソールへ
- * 出力しつつ、自分の役職から見えるレイヤー(条件テキストを含む)とプレイヤー
- * 位置マーカーのみを描画し、観測者の移動操作(矢印キー/WASD)を行う。
+ * Phaser + Colyseus のメインシーン。ロビー画面で接続済みの Room を受け取り、
+ * ルーム状態をコンソールへ出力しつつ、自分の役職から見えるレイヤー(条件テキストを
+ * 含む)とプレイヤー位置マーカーのみを描画し、観測者の移動操作(矢印キー/WASD)を行う。
  * クリア時は役職に関わらず全員にクリア演出を表示する。
  */
 export class MainScene extends Phaser.Scene {
@@ -57,10 +55,10 @@ export class MainScene extends Phaser.Scene {
     super('main');
   }
 
-  create(): void {
-    this.add.text(16, 16, 'PARALLAX-RS: サーバーに接続中…', { color: '#e2e8f0' });
+  create(data: MainSceneData): void {
+    this.add.text(16, 16, 'PARALLAX-RS: ステージを読み込み中…', { color: '#e2e8f0' });
     this.setUpMovementKeys();
-    void this.connectToServer();
+    this.bindRoom(data.room);
   }
 
   update(): void {
@@ -124,15 +122,15 @@ export class MainScene extends Phaser.Scene {
     if (this.clearBannerShown || !isCleared(status)) return;
     this.clearBannerShown = true;
 
-    this.add.text(CANVAS_ORIGIN.x, CANVAS_ORIGIN.y, 'クリア!', {
-      color: CLEAR_BANNER_COLOR,
-      fontSize: '48px',
-    }).setOrigin(0.5);
+    this.add
+      .text(CANVAS_ORIGIN.x, CANVAS_ORIGIN.y, 'クリア!', {
+        color: CLEAR_BANNER_COLOR,
+        fontSize: '48px',
+      })
+      .setOrigin(0.5);
   }
 
-  private async connectToServer(): Promise<void> {
-    const client = new Client(resolveServerUrl(import.meta.env.VITE_SERVER_URL));
-    const room = await client.joinOrCreate<ParallaxRoomState>(PARALLAX_ROOM_NAME);
+  private bindRoom(room: Room<ParallaxRoomState>): void {
     this.room = room;
 
     console.log(`ルーム "${room.roomId}" に接続しました(sessionId: ${room.sessionId})`);
