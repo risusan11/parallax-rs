@@ -8,7 +8,7 @@
 
 ## フェーズ0: 土台
 
-- [ ] npm workspaces モノレポの雛形を作る(core/server/client の3パッケージ、
+- [x] npm workspaces モノレポの雛形を作る(core/server/client の3パッケージ、
       TypeScript strict、Vitest、ESLint+Prettier)。core にダミー関数と
       テスト1件を置き、ルートの `npm test` と `npm run lint` が通ること
 - [ ] core: 2Dベクトルユーティリティ(加減、距離、線分交差)と、
