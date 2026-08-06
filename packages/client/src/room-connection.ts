@@ -3,6 +3,14 @@ const DEFAULT_SERVER_URL = 'ws://localhost:2567';
 /** Colyseus ルームサーバーの名前。server パッケージの PARALLAX_ROOM_NAME と一致させる。 */
 export const PARALLAX_ROOM_NAME = 'parallax';
 
+/** server パッケージの ParallaxRoomState.status がクリア済みを表す値。 */
+const CLEARED_STATUS = 'cleared';
+
+/** ルームステータスがクリア済みかどうかを判定する。 */
+export function isCleared(status: string): boolean {
+  return status === CLEARED_STATUS;
+}
+
 export interface PlayerSnapshot {
   readonly sessionId: string;
   readonly roleId: string;

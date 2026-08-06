@@ -3,6 +3,7 @@ import {
   INVISIBLE_COORDINATE_ROOM,
   isPlayerMarkerVisible,
   type ObjectLayer,
+  type TextConditionLayer,
   type TileLayer,
 } from '@parallax-rs/core';
 import { Client, type Room } from 'colyseus.js';
@@ -13,16 +14,22 @@ import type { ParallaxRoomState } from './parallax-room-state.js';
 import {
   PARALLAX_ROOM_NAME,
   formatRoomStateLog,
+  isCleared,
   resolveServerUrl,
   type PlayerSnapshot,
 } from './room-connection.js';
 import { gridToPixel, layoutTiles, TILE_SIZE } from './tile-map-view.js';
+import { layoutConditionTexts } from './text-condition-view.js';
 
 /** キャンバス(640x480)の中心。グリッド座標 (0, 0) をここに描画する。 */
 const CANVAS_ORIGIN = { x: 320, y: 240 };
+/** 条件テキストレイヤーを表示する開始位置(画面下部)。 */
+const CONDITION_TEXT_ORIGIN = { x: 16, y: 420 };
 const FLOOR_TILE_COLOR = 0x2a2a3a;
 const PLAYER_MARKER_COLOR = 0x38bdf8;
 const DEFAULT_OBJECT_COLOR = 0xf59e0b;
+const CONDITION_TEXT_COLOR = '#facc15';
+const CLEAR_BANNER_COLOR = '#4ade80';
 const OBJECT_COLORS: Readonly<Record<string, number>> = {
   device: 0xf472b6,
   axisOrigin: 0xa3e635,
@@ -33,13 +40,15 @@ type WasdKeys = Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
 
 /**
  * Phaser + Colyseus のメインシーン。サーバーに接続してルーム状態をコンソールへ
- * 出力しつつ、自分の役職から見えるレイヤーとプレイヤー位置マーカーのみを
- * 描画し、観測者の移動操作(矢印キー/WASD)を行う。
+ * 出力しつつ、自分の役職から見えるレイヤー(条件テキストを含む)とプレイヤー
+ * 位置マーカーのみを描画し、観測者の移動操作(矢印キー/WASD)を行う。
+ * クリア時は役職に関わらず全員にクリア演出を表示する。
  */
 export class MainScene extends Phaser.Scene {
   private room: Room<ParallaxRoomState> | undefined;
   private ownRoleId: string | undefined;
   private visibleLayersRendered = false;
+  private clearBannerShown = false;
   private readonly playerMarkers = new Map<string, Phaser.GameObjects.Rectangle>();
   private cursorKeys: Phaser.Types.Input.Keyboard.CursorKeys | undefined;
   private wasdKeys: WasdKeys | undefined;
@@ -92,10 +101,13 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  /**
-   * 自分の役職が判明したタイミングで、その役職から見えるレイヤーのみを1度だけ描画する。
-   * テキスト条件レイヤーの表示は別タスクで対応する。
-   */
+  private drawTextConditionLayer(layer: TextConditionLayer): void {
+    for (const line of layoutConditionTexts(layer, CONDITION_TEXT_ORIGIN)) {
+      this.add.text(line.pixelX, line.pixelY, line.content, { color: CONDITION_TEXT_COLOR });
+    }
+  }
+
+  /** 自分の役職が判明したタイミングで、その役職から見えるレイヤーのみを1度だけ描画する。 */
   private renderVisibleLayersIfNeeded(): void {
     if (this.visibleLayersRendered || this.ownRoleId === undefined) return;
     this.visibleLayersRendered = true;
@@ -103,7 +115,19 @@ export class MainScene extends Phaser.Scene {
     for (const layer of getVisibleLayers(INVISIBLE_COORDINATE_ROOM, this.ownRoleId)) {
       if (layer.kind === 'tile') this.drawTileLayer(layer);
       else if (layer.kind === 'object') this.drawObjectLayer(layer);
+      else if (layer.kind === 'textCondition') this.drawTextConditionLayer(layer);
     }
+  }
+
+  /** クリア状態になったタイミングで、役職に関わらず全員へ1度だけクリア演出を表示する。 */
+  private renderClearBannerIfNeeded(status: string): void {
+    if (this.clearBannerShown || !isCleared(status)) return;
+    this.clearBannerShown = true;
+
+    this.add.text(CANVAS_ORIGIN.x, CANVAS_ORIGIN.y, 'クリア!', {
+      color: CLEAR_BANNER_COLOR,
+      fontSize: '48px',
+    }).setOrigin(0.5);
   }
 
   private async connectToServer(): Promise<void> {
@@ -121,6 +145,7 @@ export class MainScene extends Phaser.Scene {
 
       this.renderVisibleLayersIfNeeded();
       this.updatePlayerMarkers(players);
+      this.renderClearBannerIfNeeded(state.status);
     });
   }
 
