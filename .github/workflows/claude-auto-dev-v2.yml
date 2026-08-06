@@ -1,22 +1,20 @@
-# .github/workflows/claude-auto-dev-v2.yml (これで丸ごと置き換え)
+# .github/workflows/claude-auto-dev-v2.yml (丸ごと置き換え)
 name: Claude Auto Dev
 
 on:
   schedule:
-    # UTC表記。JST 9時〜17時の間、2時間おきに起動を試みる
-    - cron: "1 0-8/2 * * *"
-  workflow_dispatch: {} # 手動実行ボタン
+    - cron: "1 0-8/2 * * *" # JST 9〜17時に2時間おき
+  workflow_dispatch: {}
   push:
     branches: [main]
-    paths: ["ROADMAP.md"] # ClaudeのPRをマージすると連鎖(下のredispatch経由)
+    paths: ["ROADMAP.md"]
 
 concurrency:
   group: claude-auto-dev
   cancel-in-progress: false
 
 jobs:
-  # pushイベントはclaude-code-actionが受け付けないため、
-  # workflow_dispatchとして自分自身を再発火するだけのジョブを挟む
+  # pushイベントはclaude-code-action非対応のため、workflow_dispatchで自分を再発火
   redispatch:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -30,7 +28,7 @@ jobs:
   auto-dev:
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       contents: write
       pull-requests: write
@@ -41,24 +39,52 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 未マージのclaude PRがあれば何もしない(重複防止)
+      # 状況判定: implement(新タスク着手) / fix(赤いPRの修理) / skip(健全なPRのマージ待ち)
+      - name: 状況判定
         id: guard
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          open=$(gh pr list --state open --search "head:claude/" --json number --jq length)
-          echo "skip=$([ "$open" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          prs=$(gh pr list --state open --search "head:claude/" --json number,statusCheckRollup)
+          count=$(echo "$prs" | jq 'length')
+          if [ "$count" -eq 0 ]; then
+            echo "mode=implement" >> "$GITHUB_OUTPUT"
+            echo "pr=" >> "$GITHUB_OUTPUT"
+          else
+            pr=$(echo "$prs" | jq -r '.[0].number')
+            failed=$(echo "$prs" | jq -r '[.[0].statusCheckRollup[]? | select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or .conclusion=="CANCELLED")] | length')
+            if [ "$failed" -gt 0 ]; then
+              echo "mode=fix" >> "$GITHUB_OUTPUT"
+            else
+              echo "mode=skip" >> "$GITHUB_OUTPUT"
+            fi
+            echo "pr=$pr" >> "$GITHUB_OUTPUT"
+          fi
 
+      # PRの付いていない残骸claude/ブランチを掃除(新タスク着手時のみ)
+      - name: 孤児ブランチの掃除
+        if: steps.guard.outputs.mode == 'implement'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for b in $(gh api "repos/${{ github.repository }}/branches" --paginate --jq '.[].name' | grep '^claude/' || true); do
+            open=$(gh pr list --state open --head "$b" --json number --jq 'length')
+            if [ "$open" -eq 0 ]; then
+              gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$b" || true
+            fi
+          done
+
+      # 通常モード: 次のタスクを実装
       - uses: anthropics/claude-code-action@v1
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.guard.outputs.mode == 'implement'
         with:
           github_token: ${{ secrets.CLAUDE_GH_TOKEN }}
           allowed_bots: "github-actions"
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
           claude_args: |
-            --max-turns 150
-            --allowedTools "Bash,Edit,Write,Read,Glob,Grep"
+            --max-turns 200
+            --allowedTools "Bash,Edit,Write,Read,Glob,Grep,Task,TodoWrite"
           prompt: |
             あなたはこのリポジトリの自律開発エージェントです。以下を順に実行してください。
 
@@ -69,8 +95,52 @@ jobs:
             5. mainに向けてPRを作成する。PR本文に「何を・なぜ・どう確認したか」を日本語で書く
             6. PR作成後、`gh pr merge --auto --squash` を実行してauto-mergeを予約する
 
+            完結ルール(最重要):
+            - 作業は必ずこのセッション内で完結させること。調査・実装を後続や別エージェントに
+              委ねた状態でターンを終了してはならない。Taskツールで調査を出した場合は、
+              その結果を受け取り統合するまで終了しないこと
+            - 終了してよいのは「手順6まで完了した」か「未完了タスクが1つもない」かの
+              どちらかの場合のみ
+
             禁止事項:
             - 1回の実行で複数タスクに着手しない
             - mainへの直接push禁止
             - ROADMAP.mdにない機能を勝手に追加しない
-            - 未完了タスクが1つもない場合は何もせず終了する
+            - GUIやブラウザが必要な動作確認はCI環境では不可能なので、代わりにビルド成功と
+              単体テストの通過をもって確認とし、その旨をPR本文に明記する
+
+      # 修理モード: 開いているPRのCIが赤い場合、それを直す
+      - uses: anthropics/claude-code-action@v1
+        if: steps.guard.outputs.mode == 'fix'
+        with:
+          github_token: ${{ secrets.CLAUDE_GH_TOKEN }}
+          allowed_bots: "github-actions"
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: true
+          claude_args: |
+            --max-turns 200
+            --allowedTools "Bash,Edit,Write,Read,Glob,Grep,Task,TodoWrite"
+          prompt: |
+            あなたはこのリポジトリの修理エージェントです。PR #${{ steps.guard.outputs.pr }} の
+            CIが失敗しています。以下を順に実行してください。
+
+            1. `gh pr checkout ${{ steps.guard.outputs.pr }}` でPRのブランチに切り替える
+            2. `gh pr checks ${{ steps.guard.outputs.pr }}` と `gh run view` で失敗原因を特定する
+            3. 原因を修正し、ローカルで `npm test` と `npm run lint` が通ることを確認する
+            4. 同じブランチにコミットしてpushする
+            5. `gh pr merge ${{ steps.guard.outputs.pr }} --auto --squash` でauto-mergeを予約する
+
+            完結ルール: 修正のpush完了までこのセッション内で完結させること。
+            どうしても原因が特定できない場合のみ、PRに調査結果をコメントで残して終了する。
+            新しいタスクへの着手やPRのクローズはしないこと。
+
+      # 保険: Claudeがauto-merge予約を忘れても、開いているclaude PR全てに予約を入れる
+      # (PATで実行することでマージ後のpushが連鎖トリガーを正しく発火させる)
+      - name: auto-merge予約の保険
+        if: always() && steps.guard.outputs.mode != 'skip'
+        env:
+          GH_TOKEN: ${{ secrets.CLAUDE_GH_TOKEN }}
+        run: |
+          for n in $(gh pr list --state open --search "head:claude/" --json number --jq '.[].number'); do
+            gh pr merge "$n" --auto --squash || true
+          done
