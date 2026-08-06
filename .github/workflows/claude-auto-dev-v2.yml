@@ -1,4 +1,4 @@
-# .github/workflows/claude-auto-dev.yml (これで丸ごと置き換え)
+# .github/workflows/claude-auto-dev-v2.yml (これで丸ごと置き換え)
 name: Claude Auto Dev
 
 on:
@@ -8,14 +8,27 @@ on:
   workflow_dispatch: {} # 手動実行ボタン
   push:
     branches: [main]
-    paths: ["ROADMAP.md"] # ClaudeのPRをマージすると即、次のタスクに着手する(連鎖)
+    paths: ["ROADMAP.md"] # ClaudeのPRをマージすると連鎖(下のredispatch経由)
 
 concurrency:
   group: claude-auto-dev
   cancel-in-progress: false
 
 jobs:
+  # pushイベントはclaude-code-actionが受け付けないため、
+  # workflow_dispatchとして自分自身を再発火するだけのジョブを挟む
+  redispatch:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run claude-auto-dev-v2.yml --repo ${{ github.repository }} --ref main
+
   auto-dev:
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
