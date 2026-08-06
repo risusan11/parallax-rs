@@ -50,7 +50,7 @@
 
 ## フェーズ4: 実機テストで発覚した修正
 
-- [ ] client: colyseus.js(0.16)を@colyseus/sdk(^0.17)に置き換え、サーバー(colyseus 0.17)と
+- [x] client: colyseus.js(0.16)を@colyseus/sdk(^0.17)に置き換え、サーバー(colyseus 0.17)と
       プロトコルを一致させる。import文・接続処理・ルーム参加処理を新SDKのAPIに合わせて修正し、
       既存テストを全て通す。手動確認はビルド成功をもって代替とする
 

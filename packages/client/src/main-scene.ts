@@ -1,3 +1,4 @@
+import type { Room } from '@colyseus/sdk';
 import {
   getVisibleLayers,
   INVISIBLE_COORDINATE_ROOM,
@@ -6,7 +7,6 @@ import {
   type TextConditionLayer,
   type TileLayer,
 } from '@parallax-rs/core';
-import type { Room } from 'colyseus.js';
 import Phaser from 'phaser';
 import { directionToMoveDelta, type MoveDirection } from './movement-input.js';
 import { layoutObjects } from './object-map-view.js';
