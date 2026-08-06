@@ -1,4 +1,9 @@
-import { INVISIBLE_COORDINATE_ROOM, resolveMove } from '@parallax-rs/core';
+import {
+  INVISIBLE_COORDINATE_ROOM,
+  evaluateClearCondition,
+  resolveMove,
+  type Vector2,
+} from '@parallax-rs/core';
 import { MapSchema, Schema, type } from '@colyseus/schema';
 import { Room, type Client } from 'colyseus';
 
@@ -33,8 +38,12 @@ export class PlayerState extends Schema {
   @type('number') y = INITIAL_POSITION.y;
 }
 
+/** ステージの進行状況。待機(人数待ち)→プレイ中→クリア、の一方向に遷移する。 */
+export type RoomStatus = 'waiting' | 'playing' | 'cleared';
+
 export class ParallaxRoomState extends Schema {
   @type({ map: PlayerState }) players = new MapSchema<PlayerState>();
+  @type('string') status: RoomStatus = 'waiting';
 }
 
 /**
@@ -58,13 +67,19 @@ export class ParallaxRoom extends Room<{ state: ParallaxRoomState }> {
     player.sessionId = client.sessionId;
     player.roleId = roleId;
     this.state.players.set(client.sessionId, player);
+
+    if (this.state.players.size === this.maxClients) {
+      this.state.status = 'playing';
+    }
   }
 
   /**
    * 移動ツールを持つ役職(観測者)からの移動入力を受け、障害物レイヤーとの
-   * 衝突判定を core の resolveMove で行った上で位置を更新する。
+   * 衝突判定を core の resolveMove で行った上で位置を更新する。プレイ中
+   * 以外(待機中・クリア後)の入力は無視する。
    */
   private handleMove(client: Client, message: unknown): void {
+    if (this.state.status !== 'playing') return;
     if (!isMoveMessage(message)) return;
 
     const player = this.state.players.get(client.sessionId);
@@ -80,6 +95,22 @@ export class ParallaxRoom extends Room<{ state: ParallaxRoomState }> {
     );
     player.x = next.x;
     player.y = next.y;
+
+    this.updateClearStatus();
+  }
+
+  /**
+   * 役職IDごとの現在位置を集め、core の evaluateClearCondition でクリア
+   * 条件を満たしたか判定する。満たしていればステータスをクリアへ遷移させる。
+   */
+  private updateClearStatus(): void {
+    const positions: Record<string, Vector2> = {};
+    for (const player of this.state.players.values()) {
+      positions[player.roleId] = { x: player.x, y: player.y };
+    }
+    if (evaluateClearCondition(INVISIBLE_COORDINATE_ROOM.clearCondition, positions)) {
+      this.state.status = 'cleared';
+    }
   }
 
   onLeave(client: Client): void {

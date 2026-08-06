@@ -2,6 +2,7 @@ import { createGameServer } from './server.js';
 
 export { createGameServer, PARALLAX_ROOM_NAME } from './server.js';
 export { ParallaxRoom, ParallaxRoomState, PlayerState } from './rooms/parallax-room.js';
+export type { RoomStatus } from './rooms/parallax-room.js';
 
 const DEFAULT_PORT = 2567;
 
