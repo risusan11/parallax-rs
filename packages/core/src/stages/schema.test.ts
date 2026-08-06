@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { slopeLine } from '../line.js';
 import type { StageDefinition } from './schema.js';
-import { validateStageDefinition } from './schema.js';
+import { evaluateClearCondition, validateStageDefinition } from './schema.js';
 
 function makeValidStage(): StageDefinition {
   return {
@@ -125,5 +125,77 @@ describe('validateStageDefinition', () => {
     };
     const result = validateStageDefinition(stage);
     expect(result).toEqual({ valid: true });
+  });
+});
+
+describe('evaluateClearCondition', () => {
+  it('returns true when the role is on the line', () => {
+    const condition = { kind: 'onLine' as const, roleId: 'observer', line: slopeLine(2, -3) };
+    expect(evaluateClearCondition(condition, { observer: { x: 1, y: -1 } })).toBe(true);
+  });
+
+  it('returns false when the role is off the line', () => {
+    const condition = { kind: 'onLine' as const, roleId: 'observer', line: slopeLine(2, -3) };
+    expect(evaluateClearCondition(condition, { observer: { x: 1, y: 0 } })).toBe(false);
+  });
+
+  it('returns false when the role position is missing', () => {
+    const condition = { kind: 'onLine' as const, roleId: 'observer', line: slopeLine(2, -3) };
+    expect(evaluateClearCondition(condition, {})).toBe(false);
+  });
+
+  it('returns true when the role is at the given distance from a point', () => {
+    const condition = {
+      kind: 'distanceFromPoint' as const,
+      roleId: 'observer',
+      point: { x: 0, y: 0 },
+      distance: 5,
+    };
+    expect(evaluateClearCondition(condition, { observer: { x: 3, y: 4 } })).toBe(true);
+  });
+
+  it('returns false when the role is not at the given distance from a point', () => {
+    const condition = {
+      kind: 'distanceFromPoint' as const,
+      roleId: 'observer',
+      point: { x: 0, y: 0 },
+      distance: 5,
+    };
+    expect(evaluateClearCondition(condition, { observer: { x: 1, y: 1 } })).toBe(false);
+  });
+
+  it('requires every condition to hold for "all"', () => {
+    const condition = {
+      kind: 'all' as const,
+      conditions: [
+        { kind: 'onLine' as const, roleId: 'observer', line: slopeLine(2, -3) },
+        {
+          kind: 'distanceFromPoint' as const,
+          roleId: 'observer',
+          point: { x: 0, y: -3 },
+          distance: 5,
+        },
+      ],
+    };
+    expect(evaluateClearCondition(condition, { observer: { x: 1, y: -1 } })).toBe(false);
+
+    const onLineAndAtDistance = { x: 0 + Math.sqrt(5), y: -3 + 2 * Math.sqrt(5) };
+    expect(evaluateClearCondition(condition, { observer: onLineAndAtDistance })).toBe(true);
+  });
+
+  it('requires only one condition to hold for "any"', () => {
+    const condition = {
+      kind: 'any' as const,
+      conditions: [
+        { kind: 'onLine' as const, roleId: 'observer', line: slopeLine(2, -3) },
+        {
+          kind: 'distanceFromPoint' as const,
+          roleId: 'observer',
+          point: { x: 100, y: 100 },
+          distance: 5,
+        },
+      ],
+    };
+    expect(evaluateClearCondition(condition, { observer: { x: 1, y: -1 } })).toBe(true);
   });
 });

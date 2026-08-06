@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { distanceToLine, isPointOnLine, slopeLine, verticalLine } from './line.js';
+import {
+  candidatePointsOnLineAtDistance,
+  distanceToLine,
+  isPointOnLine,
+  slopeLine,
+  verticalLine,
+} from './line.js';
 
 describe('distanceToLine', () => {
   it('computes distance to a slope line y = a*x + b', () => {
@@ -53,5 +59,44 @@ describe('isPointOnLine', () => {
   it('returns false for a point off the vertical line', () => {
     const line = verticalLine(-2);
     expect(isPointOnLine({ x: -1.99, y: 999 }, line)).toBe(false);
+  });
+});
+
+describe('candidatePointsOnLineAtDistance', () => {
+  it('finds two points on a slope line at the given distance from a center', () => {
+    const line = slopeLine(2, -3);
+    const center = { x: 0, y: -3 };
+    const points = candidatePointsOnLineAtDistance(line, center, 5);
+    expect(points).toHaveLength(2);
+    for (const point of points) {
+      expect(isPointOnLine(point, line)).toBe(true);
+      expect(Math.hypot(point.x - center.x, point.y - center.y)).toBeCloseTo(5);
+    }
+  });
+
+  it('finds two points on a vertical line at the given distance from a center', () => {
+    const line = verticalLine(3);
+    const center = { x: 0, y: 0 };
+    const points = candidatePointsOnLineAtDistance(line, center, 5);
+    expect(points).toHaveLength(2);
+    for (const point of points) {
+      expect(isPointOnLine(point, line)).toBe(true);
+      expect(Math.hypot(point.x - center.x, point.y - center.y)).toBeCloseTo(5);
+    }
+  });
+
+  it('finds one point when the circle is tangent to the line', () => {
+    const line = slopeLine(0, 5);
+    const center = { x: 0, y: 0 };
+    const points = candidatePointsOnLineAtDistance(line, center, 5);
+    expect(points).toHaveLength(1);
+    expect(points[0]!.x).toBeCloseTo(0);
+    expect(points[0]!.y).toBeCloseTo(5);
+  });
+
+  it('returns no points when the line is farther than the distance', () => {
+    const line = slopeLine(0, 100);
+    const center = { x: 0, y: 0 };
+    expect(candidatePointsOnLineAtDistance(line, center, 5)).toEqual([]);
   });
 });
