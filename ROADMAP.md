@@ -11,7 +11,7 @@
 - [x] npm workspaces モノレポの雛形を作る(core/server/client の3パッケージ、
       TypeScript strict、Vitest、ESLint+Prettier)。core にダミー関数と
       テスト1件を置き、ルートの `npm test` と `npm run lint` が通ること
-- [ ] core: 2Dベクトルユーティリティ(加減、距離、線分交差)と、
+- [x] core: 2Dベクトルユーティリティ(加減、距離、線分交差)と、
       直線(y=ax+b および x=c)と点の距離・直線上判定を実装しテストを書く
 - [ ] core: ステージ定義スキーマを設計する。レイヤー(タイル・オブジェクト・
       テキスト条件)、役職(可視レイヤー + ツール)、クリア条件をデータで表現する
