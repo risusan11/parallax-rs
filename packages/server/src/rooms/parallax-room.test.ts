@@ -62,4 +62,72 @@ describe('ParallaxRoom', () => {
     await observerClient.leave();
     await surveyorClient.leave();
   });
+
+  it('観測者の移動入力で位置が更新され、全クライアントに同期される', async () => {
+    const room = await testServer.createRoom(PARALLAX_ROOM_NAME, {});
+    const observerClient = await testServer.connectTo(room);
+    const surveyorClient = await testServer.connectTo(room);
+
+    observerClient.send('move', { dx: 1, dy: 0 });
+    await room.waitForNextPatch();
+
+    const observerState = room.state.players.get(observerClient.sessionId);
+    expect(observerState?.x).toBe(1);
+    expect(observerState?.y).toBe(0);
+    expect(surveyorClient.state.players.get(observerClient.sessionId)?.x).toBe(1);
+
+    await observerClient.leave();
+    await surveyorClient.leave();
+  });
+
+  it('障害物のあるマスへの移動は無視され、位置が変わらない', async () => {
+    const room = await testServer.createRoom(PARALLAX_ROOM_NAME, {});
+    const observerClient = await testServer.connectTo(room);
+    const surveyorClient = await testServer.connectTo(room);
+
+    observerClient.send('move', { dx: 0, dy: -1 });
+    await room.waitForNextPatch();
+    observerClient.send('move', { dx: 1, dy: 0 });
+    await room.waitForNextPatch();
+
+    const observerState = room.state.players.get(observerClient.sessionId);
+    expect(observerState?.x).toBe(0);
+    expect(observerState?.y).toBe(-1);
+
+    await observerClient.leave();
+    await surveyorClient.leave();
+  });
+
+  it('部屋の外へ出る移動は無視される', async () => {
+    const room = await testServer.createRoom(PARALLAX_ROOM_NAME, {});
+    const observerClient = await testServer.connectTo(room);
+    const surveyorClient = await testServer.connectTo(room);
+
+    for (let i = 0; i < 9; i++) {
+      observerClient.send('move', { dx: -1, dy: 0 });
+      await room.waitForNextPatch();
+    }
+
+    const observerState = room.state.players.get(observerClient.sessionId);
+    expect(observerState?.x).toBe(-8);
+
+    await observerClient.leave();
+    await surveyorClient.leave();
+  });
+
+  it('移動ツールを持たない測量士の移動入力は無視される', async () => {
+    const room = await testServer.createRoom(PARALLAX_ROOM_NAME, {});
+    const observerClient = await testServer.connectTo(room);
+    const surveyorClient = await testServer.connectTo(room);
+
+    surveyorClient.send('move', { dx: 1, dy: 0 });
+    await room.waitForNextPatch();
+
+    const surveyorState = room.state.players.get(surveyorClient.sessionId);
+    expect(surveyorState?.x).toBe(0);
+    expect(surveyorState?.y).toBe(0);
+
+    await observerClient.leave();
+    await surveyorClient.leave();
+  });
 });
