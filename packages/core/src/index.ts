@@ -14,6 +14,8 @@ export {
   candidatePointsOnLineAtDistance,
 } from './line.js';
 
+export { canMoveTo, resolveMove } from './movement.js';
+
 export type {
   Layer,
   TileLayer,
