@@ -28,6 +28,8 @@ export type {
 } from './stages/schema.js';
 export { validateStageDefinition, evaluateClearCondition } from './stages/schema.js';
 
+export { getVisibleLayers, isPlayerMarkerVisible } from './stages/visibility.js';
+
 export {
   INVISIBLE_COORDINATE_ROOM,
   DEVICE_POSITION,

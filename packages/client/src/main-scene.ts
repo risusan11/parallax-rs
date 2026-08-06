@@ -1,7 +1,14 @@
-import { INVISIBLE_COORDINATE_ROOM, type TileLayer } from '@parallax-rs/core';
+import {
+  getVisibleLayers,
+  INVISIBLE_COORDINATE_ROOM,
+  isPlayerMarkerVisible,
+  type ObjectLayer,
+  type TileLayer,
+} from '@parallax-rs/core';
 import { Client, type Room } from 'colyseus.js';
 import Phaser from 'phaser';
 import { directionToMoveDelta, type MoveDirection } from './movement-input.js';
+import { layoutObjects } from './object-map-view.js';
 import type { ParallaxRoomState } from './parallax-room-state.js';
 import {
   PARALLAX_ROOM_NAME,
@@ -15,16 +22,25 @@ import { gridToPixel, layoutTiles, TILE_SIZE } from './tile-map-view.js';
 const CANVAS_ORIGIN = { x: 320, y: 240 };
 const FLOOR_TILE_COLOR = 0x2a2a3a;
 const PLAYER_MARKER_COLOR = 0x38bdf8;
+const DEFAULT_OBJECT_COLOR = 0xf59e0b;
+const OBJECT_COLORS: Readonly<Record<string, number>> = {
+  device: 0xf472b6,
+  axisOrigin: 0xa3e635,
+  obstacle: 0xef4444,
+};
 
 type WasdKeys = Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
 
 /**
  * Phaser + Colyseus のメインシーン。サーバーに接続してルーム状態をコンソールへ
- * 出力しつつ、タイルマップの描画と観測者の移動操作(矢印キー/WASD)を行う。
+ * 出力しつつ、自分の役職から見えるレイヤーとプレイヤー位置マーカーのみを
+ * 描画し、観測者の移動操作(矢印キー/WASD)を行う。
  */
 export class MainScene extends Phaser.Scene {
   private room: Room<ParallaxRoomState> | undefined;
-  private playerMarker: Phaser.GameObjects.Rectangle | undefined;
+  private ownRoleId: string | undefined;
+  private visibleLayersRendered = false;
+  private readonly playerMarkers = new Map<string, Phaser.GameObjects.Rectangle>();
   private cursorKeys: Phaser.Types.Input.Keyboard.CursorKeys | undefined;
   private wasdKeys: WasdKeys | undefined;
 
@@ -34,14 +50,6 @@ export class MainScene extends Phaser.Scene {
 
   create(): void {
     this.add.text(16, 16, 'PARALLAX-RS: サーバーに接続中…', { color: '#e2e8f0' });
-    this.drawFloorTiles();
-    this.playerMarker = this.add.rectangle(
-      CANVAS_ORIGIN.x,
-      CANVAS_ORIGIN.y,
-      TILE_SIZE - 8,
-      TILE_SIZE - 8,
-      PLAYER_MARKER_COLOR,
-    );
     this.setUpMovementKeys();
     void this.connectToServer();
   }
@@ -71,14 +79,30 @@ export class MainScene extends Phaser.Scene {
     return undefined;
   }
 
-  private drawFloorTiles(): void {
-    const roomLayer = INVISIBLE_COORDINATE_ROOM.layers.find(
-      (layer): layer is TileLayer => layer.kind === 'tile',
-    );
-    if (roomLayer === undefined) return;
-
-    for (const tile of layoutTiles(roomLayer, CANVAS_ORIGIN)) {
+  private drawTileLayer(layer: TileLayer): void {
+    for (const tile of layoutTiles(layer, CANVAS_ORIGIN)) {
       this.add.rectangle(tile.pixelX, tile.pixelY, TILE_SIZE - 2, TILE_SIZE - 2, FLOOR_TILE_COLOR);
+    }
+  }
+
+  private drawObjectLayer(layer: ObjectLayer): void {
+    for (const object of layoutObjects(layer, CANVAS_ORIGIN)) {
+      const color = OBJECT_COLORS[object.type] ?? DEFAULT_OBJECT_COLOR;
+      this.add.rectangle(object.pixelX, object.pixelY, TILE_SIZE - 12, TILE_SIZE - 12, color);
+    }
+  }
+
+  /**
+   * 自分の役職が判明したタイミングで、その役職から見えるレイヤーのみを1度だけ描画する。
+   * テキスト条件レイヤーの表示は別タスクで対応する。
+   */
+  private renderVisibleLayersIfNeeded(): void {
+    if (this.visibleLayersRendered || this.ownRoleId === undefined) return;
+    this.visibleLayersRendered = true;
+
+    for (const layer of getVisibleLayers(INVISIBLE_COORDINATE_ROOM, this.ownRoleId)) {
+      if (layer.kind === 'tile') this.drawTileLayer(layer);
+      else if (layer.kind === 'object') this.drawObjectLayer(layer);
     }
   }
 
@@ -91,17 +115,49 @@ export class MainScene extends Phaser.Scene {
     room.onStateChange((state) => {
       const players = collectPlayers(state);
       console.log(formatRoomStateLog({ status: state.status, players }));
-      this.updatePlayerMarker(state);
+
+      const self = findPlayer(state, room.sessionId);
+      if (self !== undefined) this.ownRoleId = self.roleId;
+
+      this.renderVisibleLayersIfNeeded();
+      this.updatePlayerMarkers(players);
     });
   }
 
-  private updatePlayerMarker(state: ParallaxRoomState): void {
-    if (this.room === undefined || this.playerMarker === undefined) return;
-    const self = findPlayer(state, this.room.sessionId);
-    if (self === undefined) return;
+  /**
+   * 役職ごとの可視性(自分自身、または移動ツールを持つ役職)に基づいて
+   * プレイヤー位置マーカーを追加・更新・削除する。
+   */
+  private updatePlayerMarkers(players: ReadonlyArray<PlayerSnapshot>): void {
+    if (this.ownRoleId === undefined) return;
 
-    const pixel = gridToPixel({ x: self.x, y: self.y }, CANVAS_ORIGIN);
-    this.playerMarker.setPosition(pixel.x, pixel.y);
+    const visibleSessionIds = new Set<string>();
+    for (const player of players) {
+      if (!isPlayerMarkerVisible(INVISIBLE_COORDINATE_ROOM, this.ownRoleId, player.roleId))
+        continue;
+      visibleSessionIds.add(player.sessionId);
+
+      const pixel = gridToPixel({ x: player.x, y: player.y }, CANVAS_ORIGIN);
+      const existingMarker = this.playerMarkers.get(player.sessionId);
+      if (existingMarker === undefined) {
+        const marker = this.add.rectangle(
+          pixel.x,
+          pixel.y,
+          TILE_SIZE - 8,
+          TILE_SIZE - 8,
+          PLAYER_MARKER_COLOR,
+        );
+        this.playerMarkers.set(player.sessionId, marker);
+      } else {
+        existingMarker.setPosition(pixel.x, pixel.y);
+      }
+    }
+
+    for (const [sessionId, marker] of this.playerMarkers) {
+      if (visibleSessionIds.has(sessionId)) continue;
+      marker.destroy();
+      this.playerMarkers.delete(sessionId);
+    }
   }
 }
 
