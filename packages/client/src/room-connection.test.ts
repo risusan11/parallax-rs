@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatRoomStateLog, resolveServerUrl } from './room-connection.js';
+import { formatRoomStateLog, isCleared, resolveServerUrl } from './room-connection.js';
 
 describe('resolveServerUrl', () => {
   it('環境変数が設定されていればそれを使う', () => {
@@ -30,5 +30,16 @@ describe('formatRoomStateLog', () => {
 
   it('プレイヤーがいない場合も status を表示する', () => {
     expect(formatRoomStateLog({ status: 'waiting', players: [] })).toBe('[status: waiting] ');
+  });
+});
+
+describe('isCleared', () => {
+  it('status が cleared のときのみ true を返す', () => {
+    expect(isCleared('cleared')).toBe(true);
+  });
+
+  it('waiting・playing では false を返す', () => {
+    expect(isCleared('waiting')).toBe(false);
+    expect(isCleared('playing')).toBe(false);
   });
 });
