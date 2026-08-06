@@ -1,0 +1,49 @@
+# .github/workflows/claude-auto-dev.yml に置く
+name: Claude Auto Dev
+
+on:
+  schedule:
+    # GitHub Actionsのcronは UTC。JSTは+9時間なので
+    # 「1 0 * * *」= 日本時間 9:01(平日朝)、「1 4 * * *」= 13:01
+    - cron: "1 0 * * *"
+    - cron: "1 4 * * *"
+  workflow_dispatch: {} # 手動実行ボタンも残しておく(テスト用)
+
+concurrency:
+  group: claude-auto-dev
+  cancel-in-progress: false # 前の実行が終わるまで次を始めない
+
+jobs:
+  auto-dev:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # .gitの全履歴が必要(ブランチ操作で失敗しないため)
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # envではなくwithで渡す。ANTHROPIC_API_KEYは絶対に登録しない
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: "--max-turns 60"
+          prompt: |
+            あなたはこのリポジトリの自律開発エージェントです。以下を順に実行してください。
+
+            1. ROADMAP.md を読み、未完了「- [ ]」のタスクのうち一番上のものを1つだけ選ぶ
+            2. CLAUDE.md のルールに従って、claude/ で始まる新しいブランチ上で実装する
+            3. テストを実行し、全て通ることを確認する(通らないならPRを出さず修正する)
+            4. ROADMAP.md の該当タスクを「- [x]」に更新して同じブランチにコミットする
+            5. mainに向けてPRを作成する。PR本文に「何を・なぜ・どう確認したか」を日本語で書く
+
+            禁止事項:
+            - 1回の実行で複数タスクに着手しない
+            - mainへの直接push禁止
+            - ROADMAP.mdにない機能を勝手に追加しない
+            - 未完了タスクが1つもない場合は何もせず終了する
