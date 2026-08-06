@@ -187,6 +187,92 @@ describe('ParallaxRoom', () => {
     await surveyorClient.leave();
   });
 
+  it('観測者の移動距離が累積し、障害物で無視された移動は加算されない', async () => {
+    const room = await testServer.createRoom(PARALLAX_ROOM_NAME, {});
+    const observerClient = await testServer.connectTo(room);
+    const surveyorClient = await testServer.connectTo(room);
+
+    observerClient.send('move', { dx: 0, dy: -1 });
+    await room.waitForNextPatch();
+    // 障害物(1, -1)にぶつかり無視されるため距離は加算されない
+    observerClient.send('move', { dx: 1, dy: 0 });
+    await room.waitForNextPatch();
+
+    expect(room.state.observerDistance).toBe(1);
+
+    await observerClient.leave();
+    await surveyorClient.leave();
+  });
+
+  it('クリアするとクリア時間が記録される', async () => {
+    const room = await testServer.createRoom(PARALLAX_ROOM_NAME, {});
+    const observerClient = await testServer.connectTo(room);
+    const surveyorClient = await testServer.connectTo(room);
+
+    const [target] = candidatePointsOnLineAtDistance(TARGET_LINE, DEVICE_POSITION, TARGET_DISTANCE);
+    const observerState = room.state.players.get(observerClient.sessionId);
+    if (observerState === undefined || target === undefined) {
+      throw new Error('テストの前提が崩れています');
+    }
+    observerState.x = target.x;
+    observerState.y = target.y;
+
+    observerClient.send('move', { dx: 1, dy: 0 });
+    await room.waitForNextPatch();
+
+    expect(room.state.status).toBe('cleared');
+    expect(room.state.clearTimeMs).toBeGreaterThanOrEqual(0);
+
+    await observerClient.leave();
+    await surveyorClient.leave();
+  });
+
+  it('クリア後に retry を送るとプレイ中に戻り、位置・距離・クリア時間が初期化されリトライ回数が増える', async () => {
+    const room = await testServer.createRoom(PARALLAX_ROOM_NAME, {});
+    const observerClient = await testServer.connectTo(room);
+    const surveyorClient = await testServer.connectTo(room);
+
+    const [target] = candidatePointsOnLineAtDistance(TARGET_LINE, DEVICE_POSITION, TARGET_DISTANCE);
+    const observerState = room.state.players.get(observerClient.sessionId);
+    if (observerState === undefined || target === undefined) {
+      throw new Error('テストの前提が崩れています');
+    }
+    observerState.x = target.x;
+    observerState.y = target.y;
+
+    observerClient.send('move', { dx: 1, dy: 0 });
+    await room.waitForNextPatch();
+    expect(room.state.status).toBe('cleared');
+
+    observerClient.send('retry', {});
+    await room.waitForNextPatch();
+
+    expect(room.state.status).toBe('playing');
+    expect(room.state.retryCount).toBe(1);
+    expect(room.state.observerDistance).toBe(0);
+    expect(room.state.clearTimeMs).toBe(0);
+    expect(room.state.players.get(observerClient.sessionId)?.x).toBe(0);
+    expect(room.state.players.get(observerClient.sessionId)?.y).toBe(0);
+
+    await observerClient.leave();
+    await surveyorClient.leave();
+  });
+
+  it('プレイ中に retry を送っても無視される', async () => {
+    const room = await testServer.createRoom(PARALLAX_ROOM_NAME, {});
+    const observerClient = await testServer.connectTo(room);
+    const surveyorClient = await testServer.connectTo(room);
+
+    observerClient.send('retry', {});
+    await room.waitForNextPatch();
+
+    expect(room.state.status).toBe('playing');
+    expect(room.state.retryCount).toBe(0);
+
+    await observerClient.leave();
+    await surveyorClient.leave();
+  });
+
   it('クリア後の移動入力は無視される', async () => {
     const room = await testServer.createRoom(PARALLAX_ROOM_NAME, {});
     const observerClient = await testServer.connectTo(room);

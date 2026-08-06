@@ -12,6 +12,7 @@ import { directionToMoveDelta, type MoveDirection } from './movement-input.js';
 import { layoutObjects } from './object-map-view.js';
 import type { ParallaxRoomState } from './parallax-room-state.js';
 import { formatRoomStateLog, isCleared, type PlayerSnapshot } from './room-connection.js';
+import { formatResultSummary } from './result-view.js';
 import { gridToPixel, layoutTiles, TILE_SIZE } from './tile-map-view.js';
 import { layoutConditionTexts } from './text-condition-view.js';
 
@@ -24,6 +25,8 @@ const PLAYER_MARKER_COLOR = 0x38bdf8;
 const DEFAULT_OBJECT_COLOR = 0xf59e0b;
 const CONDITION_TEXT_COLOR = '#facc15';
 const CLEAR_BANNER_COLOR = '#4ade80';
+const RESULT_SUMMARY_COLOR = '#e2e8f0';
+const RETRY_BUTTON_COLOR = '#38bdf8';
 const OBJECT_COLORS: Readonly<Record<string, number>> = {
   device: 0xf472b6,
   axisOrigin: 0xa3e635,
@@ -47,6 +50,7 @@ export class MainScene extends Phaser.Scene {
   private ownRoleId: string | undefined;
   private visibleLayersRendered = false;
   private clearBannerShown = false;
+  private readonly clearBannerObjects: Phaser.GameObjects.GameObject[] = [];
   private readonly playerMarkers = new Map<string, Phaser.GameObjects.Rectangle>();
   private cursorKeys: Phaser.Types.Input.Keyboard.CursorKeys | undefined;
   private wasdKeys: WasdKeys | undefined;
@@ -117,17 +121,52 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  /** クリア状態になったタイミングで、役職に関わらず全員へ1度だけクリア演出を表示する。 */
-  private renderClearBannerIfNeeded(status: string): void {
-    if (this.clearBannerShown || !isCleared(status)) return;
+  /**
+   * クリア状態になったタイミングで、役職に関わらず全員へ1度だけクリア演出と
+   * リザルト(クリア時間・観測者の移動距離・リトライ回数)、「もう一度プレイする」
+   * ボタンを表示する。
+   */
+  private renderClearBannerIfNeeded(state: ParallaxRoomState): void {
+    if (this.clearBannerShown || !isCleared(state.status)) return;
     this.clearBannerShown = true;
 
-    this.add
-      .text(CANVAS_ORIGIN.x, CANVAS_ORIGIN.y, 'クリア!', {
+    const banner = this.add
+      .text(CANVAS_ORIGIN.x, CANVAS_ORIGIN.y - 80, 'クリア!', {
         color: CLEAR_BANNER_COLOR,
         fontSize: '48px',
       })
       .setOrigin(0.5);
+
+    const summaryLines = formatResultSummary({
+      clearTimeMs: state.clearTimeMs,
+      observerDistance: state.observerDistance,
+      retryCount: state.retryCount,
+    });
+    const summary = this.add
+      .text(CANVAS_ORIGIN.x, CANVAS_ORIGIN.y, summaryLines.join('\n'), {
+        color: RESULT_SUMMARY_COLOR,
+        align: 'center',
+      })
+      .setOrigin(0.5);
+
+    const retryButton = this.add
+      .text(CANVAS_ORIGIN.x, CANVAS_ORIGIN.y + 100, 'もう一度プレイする', {
+        color: RETRY_BUTTON_COLOR,
+        fontSize: '24px',
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    retryButton.on('pointerdown', () => this.room?.send('retry'));
+
+    this.clearBannerObjects.push(banner, summary, retryButton);
+  }
+
+  /** リトライでクリア状態を抜けたら、クリア演出・リザルトを片付けて再表示できるようにする。 */
+  private resetClearBannerIfNeeded(status: string): void {
+    if (!this.clearBannerShown || isCleared(status)) return;
+    this.clearBannerShown = false;
+    for (const object of this.clearBannerObjects) object.destroy();
+    this.clearBannerObjects.length = 0;
   }
 
   private bindRoom(room: Room<ParallaxRoomState>): void {
@@ -143,7 +182,8 @@ export class MainScene extends Phaser.Scene {
 
       this.renderVisibleLayersIfNeeded();
       this.updatePlayerMarkers(players);
-      this.renderClearBannerIfNeeded(state.status);
+      this.resetClearBannerIfNeeded(state.status);
+      this.renderClearBannerIfNeeded(state);
     });
   }
 
