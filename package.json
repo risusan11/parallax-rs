@@ -6,6 +6,7 @@
     "packages/*"
   ],
   "scripts": {
+    "pretest": "npm run build --workspace=@parallax-rs/core",
     "test": "npm test --workspaces --if-present",
     "lint": "eslint .",
     "build": "npm run build --workspaces --if-present"
