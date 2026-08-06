@@ -1,5 +1,5 @@
+import { Client, type Room } from '@colyseus/sdk';
 import { INVISIBLE_COORDINATE_ROOM } from '@parallax-rs/core';
-import { Client, type Room } from 'colyseus.js';
 import { buildShareUrl, extractRoomId, formatLobbyStatus } from './lobby-url.js';
 import type { ParallaxRoomState } from './parallax-room-state.js';
 import { PARALLAX_ROOM_NAME, resolveServerUrl } from './room-connection.js';

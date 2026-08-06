@@ -10,8 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@colyseus/sdk": "^0.17.43",
     "@parallax-rs/core": "^0.0.0",
-    "colyseus.js": "^0.16.22",
     "phaser": "^4.2.1"
   },
   "devDependencies": {
