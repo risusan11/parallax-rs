@@ -1,5 +1,5 @@
-import type { Line } from '../line.js';
-import type { Vector2 } from '../vector.js';
+import { isPointOnLine, type Line } from '../line.js';
+import { distance, type Vector2 } from '../vector.js';
 
 /**
  * タイル1マスの配置。type はステージデータ側で自由に定義する識別子。
@@ -161,4 +161,30 @@ export function validateStageDefinition(stage: StageDefinition): ValidationResul
   validateClearCondition(stage.clearCondition, errors);
 
   return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+/**
+ * クリア条件を、役職IDごとの現在位置に対して評価し到達済みかどうかを判定する。
+ * 該当役職の位置が渡されていない場合は未到達として扱う。
+ */
+export function evaluateClearCondition(
+  condition: ClearCondition,
+  positions: Readonly<Record<string, Vector2>>,
+): boolean {
+  switch (condition.kind) {
+    case 'onLine': {
+      const position = positions[condition.roleId];
+      return position !== undefined && isPointOnLine(position, condition.line, condition.epsilon);
+    }
+    case 'distanceFromPoint': {
+      const position = positions[condition.roleId];
+      if (position === undefined) return false;
+      const epsilon = condition.epsilon ?? 1e-9;
+      return Math.abs(distance(position, condition.point) - condition.distance) <= epsilon;
+    }
+    case 'all':
+      return condition.conditions.every((child) => evaluateClearCondition(child, positions));
+    case 'any':
+      return condition.conditions.some((child) => evaluateClearCondition(child, positions));
+  }
 }
