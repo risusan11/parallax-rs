@@ -13,6 +13,7 @@ export interface ParallaxPlayerState {
 export interface ParallaxRoomState {
   readonly status: string;
   readonly players: {
+    readonly size: number;
     forEach(callback: (player: ParallaxPlayerState, sessionId: string) => void): void;
   };
 }
